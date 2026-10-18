@@ -1,7 +1,7 @@
 //! `import overcast_engine`: composite() and stroke() for the Python core.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use overcast_engine::{Error, PngDepth, StackSpec, StrokeSpec, Target};
+use engine::{Error, PngDepth, StackSpec, StrokeSpec, Target};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -28,20 +28,23 @@ fn parse<T: serde::de::DeserializeOwned>(json: &str) -> PyResult<T> {
 fn composite<'py>(py: Python<'py>, stack_json: &str, size: u32, bit_depth: u8) -> PyResult<Bound<'py, PyBytes>> {
     let d = depth(bit_depth)?;
     let spec: StackSpec = parse(stack_json)?;
-    let png = py.allow_threads(|| overcast_engine::composite(&spec, size).and_then(|img| img.to_png(d))).map_err(err)?;
+    let png = py.allow_threads(|| engine::composite(&spec, size).and_then(|img| img.to_png(d))).map_err(err)?;
     Ok(PyBytes::new(py, &png))
 }
+
+/// `(png_bytes, (x0, y0, x1, y1), tiles)`.
+type StrokeOut<'py> = (Bound<'py, PyBytes>, (i32, i32, i32, i32), usize);
 
 /// Rasterize one stroke (JSON `StrokeSpec`) onto a transparent `size`² surface and return
 /// `(png_bytes, (x0, y0, x1, y1), tiles)`.
 #[pyfunction]
 #[pyo3(signature = (stroke_json, size, bit_depth = 8))]
-fn stroke<'py>(py: Python<'py>, stroke_json: &str, size: u32, bit_depth: u8) -> PyResult<(Bound<'py, PyBytes>, (i32, i32, i32, i32), usize)> {
+fn stroke<'py>(py: Python<'py>, stroke_json: &str, size: u32, bit_depth: u8) -> PyResult<StrokeOut<'py>> {
     let d = depth(bit_depth)?;
     let s: StrokeSpec = parse(stroke_json)?;
     let (png, r, tiles) = py
         .allow_threads(|| -> Result<_, Error> {
-            let mut st = overcast_engine::Stack::new(size, overcast_engine::Depth::U16)?;
+            let mut st = engine::Stack::new(size, engine::Depth::U16)?;
             let layer = st.push_layer(&serde_json::from_str(r#"{"type":"paint"}"#).map_err(|e| Error::Json(e.to_string()))?)?;
             let rep = st.stroke(layer, Target::Content, &s)?;
             Ok((st.composite().to_png(d)?, rep.bounds, rep.tiles))
@@ -53,14 +56,14 @@ fn stroke<'py>(py: Python<'py>, stroke_json: &str, size: u32, bit_depth: u8) -> 
 /// A live stack kept in Rust memory: add strokes incrementally, composite on demand.
 #[pyclass(unsendable)]
 struct Stack {
-    inner: overcast_engine::Stack,
+    inner: engine::Stack,
 }
 
 #[pymethods]
 impl Stack {
     #[new]
     fn new(stack_json: &str, size: u32) -> PyResult<Self> {
-        Ok(Self { inner: overcast_engine::Stack::from_json(stack_json, size).map_err(err)? })
+        Ok(Self { inner: engine::Stack::from_json(stack_json, size).map_err(err)? })
     }
 
     /// Paint a stroke into layer `layer` (`target` = "content" or "mask"); returns

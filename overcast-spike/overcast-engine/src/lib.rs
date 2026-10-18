@@ -182,7 +182,7 @@ pub fn brush_for(s: &StrokeSpec, size: u32) -> Result<(BrushSettings, Vec<Stroke
         Space::Pixel => 1.0,
     };
     let diameter = finite(s.size, "size")? * scale as f32;
-    if !(diameter > 0.0) {
+    if diameter <= 0.0 {
         return Err(Error::InvalidStroke("size must be positive".into()));
     }
     let tip = match &s.tip {
@@ -319,7 +319,8 @@ impl Stack {
             }
             LayerKind::Levels { in_black, in_white, gamma } => {
                 let (b, w, g) = (*in_black, *in_white, *gamma);
-                if !(b.is_finite() && w.is_finite() && g.is_finite()) || !(0.0..1.0).contains(&b) || !(b < w && w <= 1.0) || !(0.1..=9.99).contains(&g) {
+                let ok = b.is_finite() && w.is_finite() && (0.0..1.0).contains(&b) && b < w && w <= 1.0 && (0.1..=9.99).contains(&g);
+                if !ok {
                     return Err(Error::InvalidLayer(format!("levels in_black {b}, in_white {w}, gamma {g} out of range")));
                 }
                 let master = LevelsChannel { in_black: b, in_white: w, gamma: g, ..LevelsChannel::default() };

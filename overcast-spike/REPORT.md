@@ -16,7 +16,7 @@ Prototype: [`overcast-engine/`](overcast-engine/)
 - **Прототип работает**: стек 2048² (заливка; слой краски с мягким круглым и повёрнутым квадратным
   мазком; Hue/Saturation по маске) — CPU-композит → PNG 8/16 бит; Python через PyO3/maturin
   (`composite()`, `stroke()`, класс `Stack`); `cargo check --target wasm32-unknown-unknown` проходит;
-  13 тестов зелёные. GPU: в контейнере нет адаптера wgpu — код собран, запуск пропущен (см. §6).
+  13 тестов зелёные, clippy чистый. CPU-композит 2048² ≈ 2 с (4 vCPU, без оптимизаций). GPU: в контейнере нет адаптера wgpu, поэтому код собран, но не запускался (см. §6).
 - **Главные пробелы**: нет многоканальных (PBR) стеков и UDIM; маска — один растр, а не стек операций;
   нет ссылочных масок, 3D-шума по position map, мазков в screen-space; композит идёт в display RGB
   (как Photoshop), а не в линейном свете, и нет нормализации для normal map.
@@ -241,7 +241,18 @@ Demo output (CPU, 2048², 16-bit layers), downsampled 4× for the repo:
 
 ## 6. What ran, what was only checked, what failed
 
-RESULTS_PLACEHOLDER
+Environment: cloud container, 4 vCPU, Linux x86_64, Rust 1.97.0, Python 3.13, maturin 1.x,
+**no GPU** (no Vulkan ICD, no `/dev/dri`).
+
+| Item | Status | Detail |
+|---|---|---|
+| `cargo test --workspace` | **ran, 13/13 pass** | `tests/stack.rs`: fill colour; sparse allocation (a short stroke on 2048² touches 1–2 of 64 tiles); soft vs hard falloff; square tip rotates with `angle`; custom alpha (ring) stamp; Hue/Sat only inside its painted mask (red → green inside, red outside); Multiply at 50 % + Levels; disabled layer skipped; **UV strokes re-rasterize at 128² and 512² with mean abs difference < 0.02** after downsampling; seeded scatter replays bit-identically and changes with the seed; JSON spec round-trip; 8- and 16-bit PNG decode; bad input → `Err` (size 0 / huge, bad JSON, painting a fill, missing layer, no points, NaN, negative/inf size, wrong alpha-tip length, zero-size tip, inverted Levels, NaN opacity), and a 1e9 px brush is clamped instead of allocating |
+| `cargo clippy --workspace --all-targets -- -D warnings` | **ran, clean** | Default features. The `gpu` feature (`src/gpu.rs`) was compiled in release, but clippy was not run with it |
+| Demo, `cargo run --release --features gpu --example demo` | **ran** | 2048², 16-bit layers. Building the stack and rasterizing the 3 strokes: 2.17 s; sparse tiles: paint layer 41/64, Hue/Sat mask 52/64 (the soft strokes are wide); **CPU composite 2048²: 2.08 s**. Wrote `stack_cpu.png` (8-bit, 0.76 MB), `stack_cpu16.png` (16-bit, 5.0 MB), `stack_preview_512.png` (committed as `overcast-engine/docs/`). These timings are a first, uncached composite on a shared 4-vCPU container, and nothing was tuned. PhotoCraft's own perf budgets live in its `docs/scorecard.md` |
+| GPU compositor | **compiled, not run** | `photocraft-gpu` + wgpu 30 compiled into the demo. `Gpu::open()` found **no wgpu adapter** in the container, so the GPU pass was skipped (as designed: the CPU is the reference). Not verified here: GPU vs CPU parity on this stack. PhotoCraft's own `crates/gpu/tests/parity.rs` asserts that within 1/255 on machines with an adapter |
+| PyO3 module (`maturin develop --release`) | **built and ran** | abi3 wheel `overcast_engine-0.0.1-cp39-abi3-linux_x86_64`. `py/demo.py` output: composite 512² 8-bit 143 ms; 2048² 8-bit 1.23 s; 2048² 16-bit 1.29 s (all PNG headers checked); `stroke()` on 2048² → damage `(130, 130, 682, 481)`, **5/64 tiles**; `Stack.stroke` on a paint layer and on a mask changes the composite; 5 bad calls raise `ValueError`, none crash. (After this run, two clippy-only edits followed: a type alias in `py/src/lib.rs`, and comparison rewrites in `lib.rs`. They were re-tested with `cargo test`, but the Python demo was not re-run) |
+| `cargo check -p overcast-engine --target wasm32-unknown-unknown` | **checked, passes** | `check` only: no wasm-bindgen API, nothing executed in a browser. `rayon` is off on wasm (PhotoCraft gates it), so the CPU compositor would be single-threaded there |
+| Failures along the way | fixed | `LevelsChannel` is not `Copy` (array init); the first soft-tip test sampled a line where build-up saturates (switched to one dab); the PyO3 `#[pymodule] fn overcast_engine` clashed with the dependency crate's name (dependency renamed to `engine`); the first demo build was killed by my own 18-minute `timeout` while it compiled wgpu in release (a full release build with wgpu takes ~17 min here) |
 
 ## 7. Recommendation
 
