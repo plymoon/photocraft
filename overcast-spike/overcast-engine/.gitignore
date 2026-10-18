@@ -1,0 +1,6 @@
+target/
+out/
+py/.venv/
+py/out/
+*.so
+__pycache__/
