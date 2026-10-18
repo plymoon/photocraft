@@ -1,0 +1,54 @@
+# Spike: Overcast's layer/mask/brush engine on top of PhotoCraft crates (path dependencies).
+# A standalone workspace: PhotoCraft's own workspace and crates are not modified.
+[workspace]
+members = [".", "py"]
+resolver = "3"
+
+[package]
+name = "overcast-engine"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Spike: non-destructive layer stack (fill / paint / adjustment + masks) on PhotoCraft's raster, paint and compose crates"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+photocraft-geom = { path = "../../crates/geom" }
+photocraft-color = { path = "../../crates/color" }
+photocraft-raster = { path = "../../crates/raster" }
+photocraft-doc = { path = "../../crates/doc" }
+photocraft-paint = { path = "../../crates/paint" }
+photocraft-compose = { path = "../../crates/compose" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+png = "0.18"
+# Optional GPU compositor (native only; PhotoCraft's wgpu backend).
+photocraft-gpu = { path = "../../crates/gpu", optional = true }
+wgpu = { version = "30", optional = true }
+pollster = { version = "1", optional = true }
+
+[dev-dependencies]
+photocraft-color = { path = "../../crates/color" }
+serde_json = "1"
+png = "0.18"
+
+[[example]]
+name = "demo"
+
+[features]
+gpu = ["dep:photocraft-gpu", "dep:wgpu", "dep:pollster"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# Same speed-up PhotoCraft uses: dependencies optimised even in dev/test builds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
